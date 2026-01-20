@@ -70,7 +70,7 @@ private:
 
     nvinfer1::ICudaEngine* engine_ = nullptr;        // trt engine
     nvinfer1::IExecutionContext* context_ = nullptr; // trt execution context
-    Logger* logger_ = nullptr;                         // nv logger
+    Logger* logger_ = nullptr;                       // nv logger
 
     bool initFromOnnx(const std::string& onnxPath); // init from engine
 

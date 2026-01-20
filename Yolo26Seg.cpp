@@ -258,7 +258,7 @@ std::vector<YOLOInferResult> Yolo26Seg::postProcessing(std::vector<InferenceOutp
     }
 
     size_t numDetection = vecOutputDims_[detIndex].d[1]; // 300: detection number
-    size_t dimension = vecOutputDims_[detIndex].d[2]; // 38: dimension for each detection
+    size_t dimension = vecOutputDims_[detIndex].d[2];    // 38: dimension for each detection
     size_t numProtos = vecOutputDims_[protoIndex].d[1];  // 32: number of mask prototypes
     size_t protoH = vecOutputDims_[protoIndex].d[2];     // 32: height of mask prototype
     size_t protoW = vecOutputDims_[protoIndex].d[3];     // 32: width of mask prototypes

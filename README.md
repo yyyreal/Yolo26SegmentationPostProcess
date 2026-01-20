@@ -10,12 +10,13 @@ This repository contains a C++ inference project based on **NVIDIA TensorRT** an
 
 The project has been tested under the following environment:
 
-- **Operating System**: Windows 11 (x64) / Ubuntu 24.04.3 
+- **Operating System**: Windows 11 (x64) / Ubuntu 24.04.3
 - **IDE / Compiler**: Visual Studio 2022 / gcc 13.3.0
 - **CUDA Toolkit**: 12.8
 - **TensorRT**: 10.1.3
 
-> ⚠️ Note: Other versions may work but have not been verified. Compatibility issues may arise when mixing different CUDA or TensorRT versions.
+> ⚠️ Note: Other versions may work but have not been verified. Compatibility issues may arise when mixing different CUDA
+> or TensorRT versions.
 
 ---
 
@@ -36,6 +37,7 @@ Before building the project, ensure that the following dependencies are properly
 You **must** modify `CMakeLists.txt` to correctly point to the locations of CUDA and TensorRT installed on your system.
 
 On my machine, the paths are as follows, you should update them to match your local installation.
+
 ```cmake
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
     include_directories(
@@ -59,8 +61,8 @@ else ()
     )
 endif ()
 ```
----
 
+---
 
 ## Current Implementation Notes
 
@@ -83,6 +85,7 @@ The following optimizations are **strongly recommended** for production-level us
 - Store the engine binary on disk for reuse.
 
 Benefits:
+
 - Significantly reduces startup time
 - Avoids repeated network parsing and optimization
 
