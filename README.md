@@ -75,36 +75,6 @@ This design is simple and suitable for development and debugging, but it increas
 
 ---
 
-## Recommended Optimizations
-
-The following optimizations are **strongly recommended** for production-level usage:
-
-### 1. TensorRT Engine Serialization
-
-- Serialize the built TensorRT engine to a file (`.engine`) after the first successful build.
-- Store the engine binary on disk for reuse.
-
-Benefits:
-
-- Significantly reduces startup time
-- Avoids repeated network parsing and optimization
-
----
-
-### 2. Engine Deserialization
-
-- On subsequent runs, load the serialized engine from disk.
-- Reconstruct the `ICudaEngine` directly using TensorRT runtime APIs.
-
----
-
-### 3. Context Reconstruction
-
-- After deserializing the engine, explicitly create an `IExecutionContext`.
-- Ensure proper handling of dynamic shapes (if applicable).
-
----
-
 ## Engineering Considerations
 
 - Validate engine compatibility with the target GPU before reuse.
