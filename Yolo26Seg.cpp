@@ -3,10 +3,13 @@
 // https://github.com/yyyreal
 //
 
-#include <fstream>
-#include <filesystem>
-#include "NvOnnxParser.h"
 #include "Yolo26Seg.h"
+#include <filesystem>
+#include <fstream>
+#include "NvOnnxParser.h"
+
+#define ENGINE_EXTENSION ".engine"
+#define ONNX_EXTENSION ".onnx"
 
 namespace fs = std::filesystem;
 
@@ -36,21 +39,60 @@ Yolo26Seg::~Yolo26Seg() {
 
 bool Yolo26Seg::init() {
 
-    bool onnxFound = fs::exists(fs::absolute(modelFile_));
-    if (!onnxFound) {
+    fs::path modelPath(modelFile_);
+
+    // check file existence
+    if (!fs::exists(modelPath)) {
         std::cerr << "Cannot find model file: " << modelFile_ << std::endl;
         return false;
     }
 
-    std::cout << "Try loading onnx file: " << modelFile_ << std::endl;
-    bool onnxInitFlag = initFromOnnx(fs::absolute(modelFile_).string());
-    if (onnxInitFlag) {
-        std::cout << "Loading succeed..." << std::endl;
-    } else {
-        std::cerr << "Loading failed... " << std::endl;
+    std::string ext = modelPath.extension().string(); // file extension
+    fs::path absolutePath = fs::absolute(modelPath);  // absolute path
+
+    // if it is engine file, load it directly
+    if (ext == ENGINE_EXTENSION) {
+        std::cout << "Loading engine file directly: " << absolutePath << std::endl;
+        if (initFromEngine(absolutePath.string())) {
+            std::cout << "Engine loading succeed." << std::endl;
+            return true;
+        } else {
+            std::cerr << "CRITICAL ERROR: Failed to load specified engine file: " << absolutePath << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
     }
 
-    return onnxInitFlag;
+    // if it is onnx file, check whether corresponding engine file exists
+    if (ext == ONNX_EXTENSION) {
+        fs::path enginePath = absolutePath;
+        enginePath.replace_extension(ENGINE_EXTENSION);
+
+        if (fs::exists(enginePath)) {
+            std::cout << "Found optimized engine file, trying to load: " << enginePath << std::endl;
+            if (initFromEngine(enginePath.string())) {
+                std::cout << "Engine loading succeed." << std::endl;
+                return true;
+            } else {
+                std::cerr << "Warning: optimized engine file is invalid. Deleting and falling back to ONNX..."
+                          << std::endl;
+                fs::remove(enginePath);
+            }
+        }
+
+        std::cout << "Loading onnx file: " << absolutePath << std::endl;
+        bool onnxInitFlag = initFromOnnx(absolutePath.string());
+
+        if (onnxInitFlag) {
+            std::cout << "ONNX loading succeed." << std::endl;
+        } else {
+            std::cerr << "ONNX loading failed." << std::endl;
+        }
+        return onnxInitFlag;
+    }
+
+    std::cerr << "Unsupported model file type(extension: " << ext << ", expected: " << ENGINE_EXTENSION << " or "
+              << ONNX_EXTENSION << std::endl;
+    return false;
 }
 
 std::vector<YOLOInferResult> Yolo26Seg::inference(const cv::Mat& image) {
@@ -144,9 +186,7 @@ bool Yolo26Seg::initFromOnnx(const std::string& onnxPath) {
     onnxFilestream.close();
 
     nvinfer1::IBuilder* iBuilder = nvinfer1::createInferBuilder(*logger_);
-    nvinfer1::NetworkDefinitionCreationFlags flags{
-        1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH)};
-    nvinfer1::INetworkDefinition* network = iBuilder->createNetworkV2(flags);
+    nvinfer1::INetworkDefinition* network = iBuilder->createNetworkV2(0U);
     nvinfer1::IBuilderConfig* config = iBuilder->createBuilderConfig();
     nvonnxparser::IParser* onnxParser = nvonnxparser::createParser(*network, *logger_);
     if (!onnxParser->parse(onnxData.data(), onnxSize)) {
@@ -154,38 +194,42 @@ bool Yolo26Seg::initFromOnnx(const std::string& onnxPath) {
         return false;
     }
 
-    std::cout << "Building inference environment, may take very long....(only once)" << std::endl;
-    engine_ = iBuilder->buildEngineWithConfig(*network, *config);
+    std::cout << "Build hardware-optimized engine from original model file and create infer context, may take long..(only once)" << std::endl;
+    auto plan = iBuilder->buildSerializedNetwork(*network, *config);
+    if (nullptr == plan) {
+        std::cerr << "Optimize model failed.." << std::endl;
+        return false;
+    }
+
+    auto runtime = nvinfer1::createInferRuntime(*static_cast<nvinfer1::ILogger*>(logger_));
+    engine_ = runtime->deserializeCudaEngine(plan->data(), plan->size());
     if (nullptr == engine_) {
-        std::cerr << "TRT engine create failed.." << std::endl;
+        std::cerr << "Hardware-optimized engine create failed.." << std::endl;
         return false;
     }
     context_ = engine_->createExecutionContext();
     if (nullptr == context_) {
-        std::cerr << "TRT context create failed.." << std::endl;
+        std::cerr << "Infer context create failed.." << std::endl;
         return false;
     }
-    std::cout << "Building environment finished" << std::endl;
+    std::cout << "Hardware-optimized engine and infer context create environment finished" << std::endl;
 
     inputsNum_ = network->getNbInputs();
     outputsNum_ = network->getNbOutputs();
 
-    /*
-    *  todo: Since TRT context and engine are successfully created, we can serialized them for later use.
-    *  you can modify the code to implement deserialization of TRT context and engine.
-    *
-    *  std::string engineFilename = fs::path(onnxPath).stem().string() + ".engine";
-    *  std::string enginePath = fs::path(onnxPath).parent_path().append(engineFilename).string();
-    *  nvinfer1::IHostMemory* serializedModel = iBuilder->buildSerializedNetwork(*network, *config);
-    *  std::ofstream engineFileStream(enginePath, std::ios::binary);
-    *  engineFileStream.write(static_cast<char*>(serializedModel->data()), serializedModel->size());
-    *  ngineFileStream.close();
-    *
-    *  delete serializedModel;
-    */
+    // save optimized engine file
+    std::string enginePath = fs::absolute(onnxPath).replace_extension(ENGINE_EXTENSION).string();
+    std::ofstream engineStream(enginePath, std::ios::binary);
+    if (engineStream.is_open()) {
+        engineStream.write(static_cast<char*>(plan->data()), plan->size());
+        engineStream.close();
+        std::cout << "Optimized engine file has been saved to: " << enginePath << std::endl;
+    }
 
     retrieveNetInfo();
 
+    delete runtime;
+    delete plan;
     delete onnxParser;
     delete network;
     delete config;
@@ -193,6 +237,53 @@ bool Yolo26Seg::initFromOnnx(const std::string& onnxPath) {
 
     if (inputsNum_ != inputSizes_.size() || outputsNum_ != outputSizes_.size()) {
         std::cerr << "Error network's input/output number..." << std::endl;
+        return false;
+    }
+
+    // Assert only one input branch
+    modelHeight_ = vecInputDims_[0].d[2];
+    modelWidth_ = vecInputDims_[0].d[3];
+
+    return true;
+}
+
+bool Yolo26Seg::initFromEngine(const std::string& enginePath) {
+
+    std::ifstream engineFilestream(enginePath, std::ios::binary);
+    if (!engineFilestream.is_open()) {
+        std::cerr << "Open engine file failed: " << enginePath << std::endl;
+        return false;
+    }
+
+    engineFilestream.seekg(0, std::ios::end);
+    size_t engineSize = engineFilestream.tellg();
+    engineFilestream.seekg(0, std::ios::beg);
+
+    std::vector<char> engineData(engineSize);
+    engineFilestream.read(engineData.data(), engineSize);
+    engineFilestream.close();
+
+    nvinfer1::IRuntime* runtime = nvinfer1::createInferRuntime(*static_cast<nvinfer1::ILogger*>(logger_));
+    engine_ = runtime->deserializeCudaEngine(engineData.data(), engineSize);
+    if (nullptr == engine_) {
+        std::cerr << "TRT engine create failed.." << std::endl;
+        return false;
+    }
+    context_ = engine_->createExecutionContext(); // context
+    if (nullptr == context_) {
+        std::cerr << "TRT context create failed.." << std::endl;
+        return false;
+    }
+
+    delete runtime;
+
+    retrieveNetInfo();
+
+    inputsNum_ = inputSizes_.size();
+    outputsNum_ = outputSizes_.size();
+
+    if (inputsNum_ == 0) {
+        std::cerr << "Error network's input number: " << inputsNum_ << ", cannot parse network input dims" << std::endl;
         return false;
     }
 
@@ -304,7 +395,11 @@ std::vector<YOLOInferResult> Yolo26Seg::postProcessing(std::vector<InferenceOutp
         cv::Mat objMaskROIResized = sigmoidMat(objMaskRectResized).clone();
 
         cv::Mat objMaskROI;
-        cv::resize(objMaskROIResized, objMaskROI, cv::Size(static_cast<int>(w), static_cast<int>(h)), cv::INTER_CUBIC);
+        if (objMaskROIResized.empty()) {
+            objMaskROI = cv::Mat::zeros(cv::Size(int(w), int(h)), CV_8UC1);
+        } else {
+            cv::resize(objMaskROIResized, objMaskROI, cv::Size(int(w), int(h)), cv::INTER_CUBIC);
+        }
 
         cv::Size blurKernel(3, 3);
         cv::Mat objMaskROIBlurred;

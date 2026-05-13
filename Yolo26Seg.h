@@ -25,7 +25,7 @@ typedef struct YOLOInferResult {
 
 
 typedef struct Config {
-    std::string modelFile;
+    std::string modelFile; // onnx model file path or engine file path
     float scoreThreshold = 0.25f;
 } Config;
 
@@ -48,9 +48,8 @@ public:
     std::vector<YOLOInferResult> inference(const cv::Mat& image);
 
 private:
-    std::string modelFile_; //onnx model file path
-
-    float scoreThreshold_; // score threshold
+    std::string modelFile_; // onnx/engine model file path
+    float scoreThreshold_;  // score threshold
 
     int32_t deviceId_ = 0;    // nv gpu id
     int32_t imageWidth_ = 0;  // image width
@@ -72,13 +71,11 @@ private:
     nvinfer1::IExecutionContext* context_ = nullptr; // trt execution context
     Logger* logger_ = nullptr;                       // nv logger
 
-    bool initFromOnnx(const std::string& onnxPath); // init from engine
-
-    void retrieveNetInfo(); // retrieve network info from engine
-
-    std::vector<YOLOInferResult> postProcessing(std::vector<InferenceOutput>& inferOutputs) const; // post processing
-
+    bool initFromOnnx(const std::string& onnxPath);     // init from onnx file
+    bool initFromEngine(const std::string& enginePath); // init from engine file
+    void retrieveNetInfo();                             // retrieve network info from engine
+    std::vector<YOLOInferResult> postProcessing(std::vector<InferenceOutput>& inferOutputs) const; // post-processing
 };
 
 
-#endif //YOLO26SEGMENTATIONPOSTPROCESS_YOLO26SEG_H
+#endif // YOLO26SEGMENTATIONPOSTPROCESS_YOLO26SEG_H
